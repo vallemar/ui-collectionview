@@ -1,106 +1,155 @@
-import { Observable } from '@nativescript/core/data/observable';
-import { ObservableArray } from '@nativescript/core/data/observable-array';
-import { CollectionView } from '..';
+import {ItemEventData, ObservableArray} from '@nativescript/core';
+import {CollectionView as NCCollectionView} from '..';
+import {defineComponent, getCurrentInstance, h, ref, registerElement, watch} from 'nativescript-vue';
+
+const ELEMENT_REF = Symbol(__DEV__ ? `elementRef` : ``);
+
+registerElement("NSCollectionView", () => NCCollectionView, {
+    viewFlags: 8
+});
 
 const VUE_VIEW = '__vueVNodeRef__';
-export default {
-    props: {
-        items: {
-            validator: (val) => !val || Array.isArray(val) || val instanceof ObservableArray,
-            required: true
-        },
-        '+alias': {
-            type: String,
-            default: 'item'
-        },
-        '+index': {
-            type: String
-        },
-        itemTemplateSelector: {
-            type: Function,
-            default: undefined
-        }
-    },
-    template: `<NativeCollectionView ref="listView" :items="items" v-bind="$attrs" v-on="listeners" @itemTap="onItemTap" @itemLoading="onItemLoadingInternal" @itemDisposing="onItemDisposingInternal"
-  >
-  <slot /></NativeCollectionView>`,
-    watch: {
-        items: {
-            handler(newVal, oldVal) {
-                if (!(oldVal instanceof Observable)) {
-                    this.$refs.listView.setAttribute('items', newVal);
-                }
-            },
-            deep: true
-        }
-    },
-    created() {
-        // we need to remove the itemTap handler from a clone of the $listeners
-        // object because we are emitting the event ourselves with added data.
-        const listeners = Object.assign({}, this.$listeners);
-        delete listeners.itemTap;
-        this.listeners = listeners;
-        this.getItemContext = getItemContext.bind(this);
-    },
-    mounted() {
-        const listView: any & { nativeView: CollectionView } = this.$refs.listView;
-        this.listView = listView.nativeView;
-        listView.setAttribute('itemTemplates', this.$templates.getKeyedTemplates());
 
-        const itemTemplateSelector = this.itemTemplateSelector
-            ? this.itemTemplateSelector // custom template selector if any
-            : (item, index, items) => this.$templates.selectorFn(this.getItemContext(item, index));
-        listView.setAttribute('itemTemplateSelector', itemTemplateSelector);
-    },
-    methods: {
-        getItem(index) {
-            return (this.listView as CollectionView).getItemAtIndex(index);
-        },
-        onItemTap(args) {
-            this.$emit('itemTap', { item: this.getItem(args.index), ...args });
-        },
-        updateViewTemplate(args) {
-            const listView = args.object as CollectionView;
-            const index = args.index;
-            const items = args.object.items;
-            const currentItem = args.bindingContext;
-            const name = (listView as any)._itemTemplateSelector(currentItem, index, items);
-            const context = this.getItemContext(currentItem, index);
-            const oldVnode = args.view && args.view[VUE_VIEW];
-            if (args.view) {
-                args.view._batchUpdate(() => {
-                    args.view = this.$templates.patchTemplate(name, context, oldVnode);
-                });
-            } else {
-                args.view = this.$templates.patchTemplate(name, context, oldVnode);
-            }
-        },
-        onItemLoadingInternal(args) {
-            this.updateViewTemplate(args);
-        },
-        onItemDisposingInternal(args) {
-            const oldVnode = args.view && args.view[VUE_VIEW];
-            if (oldVnode && oldVnode.context) {
-                oldVnode.context.$destroy();
-                args.view[VUE_VIEW] = null;
-            }
-        },
-        refresh() {
-            (this.listView as CollectionView).refresh();
-        },
-        scrollToIndex(index, animate = false) {
-            (this.listView as CollectionView).scrollToIndex(index, animate);
-        }
-        // getSelectedItems() {
-        //     return (this.listView as CollectionView).getSelectedItems();
-        // }
-    }
-};
-function getItemContext(item, index = -1, alias = this.$props['+alias'], index_alias = this.$props['+index']) {
+export interface ListItem<T = any> {
+    item: T;
+    index: number;
+    even: boolean;
+    odd: boolean;
+}
+
+function getListItem(item: any, index: number): ListItem {
     return {
-        [alias]: item,
-        [index_alias || '$index']: index,
-        $even: index % 2 === 0,
-        $odd: index % 2 !== 0
+        item,
+        index,
+        even: index % 2 === 0,
+        odd: index % 2 !== 0,
     };
 }
+
+const LIST_CELL_ID = Symbol("list_cell_id");
+
+export const CollectionView = /*#__PURE__*/ defineComponent({
+    props: {
+        items: {
+            validator(value) {
+                return Array.isArray(value) || value instanceof ObservableArray;
+            },
+        },
+        itemTemplateSelector: Function,
+    },
+    setup(props, ctx) {
+        console.log("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        const itemTemplates = Object.keys(ctx.slots).map((slotName) => {
+            return {
+                key: slotName,
+                createView() {
+                    // no need to return anything here
+                },
+            };
+        });
+
+        const getSlotName = (itemCtx: ListItem) =>
+            props.itemTemplateSelector?.(itemCtx) ?? "default";
+
+        const listView = ref(null);
+
+        const vm = getCurrentInstance();
+
+        watch(props, () => {
+            try {
+                if (props.items instanceof ObservableArray) {
+                    return;
+                }
+
+                const lv: NCCollectionView = listView.value?.nativeView;
+                lv?.refresh();
+            } catch (err) {
+                console.error("Error while refreshing ListView", err);
+            }
+        });
+
+        let cellId = 0;
+
+        interface ItemCellData {
+            itemCtx: ListItem;
+            slotName: string;
+        }
+
+        const cells = ref<Record<string, ItemCellData>>({});
+
+        function onitemLoading(event: ItemEventData) {
+            const el = event.view?.[ELEMENT_REF];
+            const id = el?.nativeView[LIST_CELL_ID] ?? `LIST_CELL_${cellId++}`;
+
+            const itemCtx: ListItem = getListItem(
+                props.items instanceof ObservableArray
+                    ? props.items.getItem(event.index)
+                    : props.items[event.index],
+                event.index
+            );
+
+            // update the cell data with the current row
+            cells.value[id] = {
+                itemCtx,
+                slotName: getSlotName(itemCtx),
+            };
+
+            // trigger an update!
+            vm.update();
+
+            // find the vnode rendering this cell
+            const vnode = (vm.subTree.children as { key: any, el: any }[]).find((vnode) => {
+                return vnode.key === id;
+            });
+
+            // store the cell id on the Element itself so we can retrieve it when recycling kicks in
+            const cellEl = vnode.el.nativeView;
+            cellEl[LIST_CELL_ID] = id;
+
+            // finally, set the event.view to the rendered cellEl
+            event.view = cellEl;
+        }
+
+        function itemTemplateSelector(item, index) {
+            // pass on the template selector call with the ListItem context
+            return getSlotName(getListItem(item, index));
+        }
+
+        // render all realized templates as children
+        const cellVNODES = () =>
+            Object.entries(cells.value).map(([id, entry]) => {
+                const vnodes: any[] = ctx.slots[entry.slotName]?.(entry.itemCtx) ?? [
+                    // default template is just a label
+                    h("Label", {
+                        text: entry.itemCtx.item,
+                    }),
+                ];
+
+                if (vnodes.length > 1) {
+                    console.log(
+                        `ListView template must contain a single root element. Found: ${vnodes.length}. Only the first one will be used.`
+                    );
+                }
+
+                const vnode = vnodes[0];
+                // set the key to the list cell id, so we can find this cell later...
+                vnode.key = id;
+
+                return vnode;
+            });
+
+        return () => {
+            return h(
+                "NSCollectionView",
+                {
+                    ref: listView,
+                    items: props.items,
+                    itemTemplates,
+                    itemTemplateSelector,
+                    onitemLoading,
+                },
+                cellVNODES()
+            );
+        };
+    },
+});
