@@ -38,7 +38,6 @@ export const CollectionView = /*#__PURE__*/ defineComponent({
         itemTemplateSelector: Function,
     },
     setup(props, ctx) {
-        console.log("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
         const itemTemplates = Object.keys(ctx.slots).map((slotName) => {
             return {
                 key: slotName,
@@ -127,7 +126,7 @@ export const CollectionView = /*#__PURE__*/ defineComponent({
 
                 if (vnodes.length > 1) {
                     console.log(
-                        `ListView template must contain a single root element. Found: ${vnodes.length}. Only the first one will be used.`
+                        `CollectionView template must contain a single root element. Found: ${vnodes.length}. Only the first one will be used.`
                     );
                 }
 
