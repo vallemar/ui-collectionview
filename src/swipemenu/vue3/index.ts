@@ -1,10 +1,9 @@
-import { SwipeMenuComp } from './component';
-import { install } from '..';
+import { install, SwipeMenu } from '..';
 
 const SwipeMenuPlugin = {
     install(app: any) {
         install();
-        app.registerElement('SwipeMenu', () => require('../index').SwipeMenu, {
+        app.registerElement('SwipeMenu', () => SwipeMenu, {
             overwriteExisting: true,
             nodeOps: {
                 insert(child, parent) {
